@@ -1,131 +1,212 @@
-module.exports = ({ name, price1, price2, receiptId }) => {
-    const today = new Date();
-	return `
-	    <!doctype html>
-	    <html>
-	       <head>
-	          <meta charset="utf-8">
-	          <title>PDF Result Template</title>
-	          <style>
-	             .invoice-box {
-	             max-width: 800px;
-	             margin: auto;
-	             padding: 30px;
-	             border: 1px solid #eee;
-	             box-shadow: 0 0 10px rgba(0, 0, 0, .15);
-	             font-size: 16px;
-	             line-height: 24px;
-	             font-family: 'Helvetica Neue', 'Helvetica',
-	             color: #555;
-	             }
-	             .margin-top {
-	             margin-top: 50px;
-	             }
-	             .justify-center {
-	             text-align: center;
-	             }
-	             .invoice-box table {
-	             width: 100%;
-	             line-height: inherit;
-	             text-align: left;
-	             }
-	             .invoice-box table td {
-	             padding: 5px;
-	             vertical-align: top;
-	             }
-	             .invoice-box table tr td:nth-child(2) {
-	             text-align: right;
-	             }
-	             .invoice-box table tr.top table td {
-	             padding-bottom: 20px;
-	             }
-	             .invoice-box table tr.top table td.title {
-	             font-size: 45px;
-	             line-height: 45px;
-	             color: #333;
-	             }
-	             .invoice-box table tr.information table td {
-	             padding-bottom: 40px;
-	             }
-	             .invoice-box table tr.heading td {
-	             background: #eee;
-	             border-bottom: 1px solid #ddd;
-	             font-weight: bold;
-	             }
-	             .invoice-box table tr.details td {
-	             padding-bottom: 20px;
-	             }
-	             .invoice-box table tr.item td {
-	             border-bottom: 1px solid #eee;
-	             }
-	             .invoice-box table tr.item.last td {
-	             border-bottom: none;
-	             }
-	             .invoice-box table tr.total td:nth-child(2) {
-	             border-top: 2px solid #eee;
-	             font-weight: bold;
-	             }
-	             @media only screen and (max-width: 600px) {
-	             .invoice-box table tr.top table td {
-	             width: 100%;
-	             display: block;
-	             text-align: center;
-	             }
-	             .invoice-box table tr.information table td {
-	             width: 100%;
-	             display: block;
-	             text-align: center;
-	             }
-	             }
-	          </style>
-	       </head>
-	       <body>
-	          <div class="invoice-box">
-	             <table cellpadding="0" cellspacing="0">
-	                <tr class="top">
-	                   <td colspan="2">
-	                      <table>
-	                         <tr>
-	                            <td class="title"><img  src="https://i2.wp.com/cleverlogos.co/wp-content/uploads/2018/05/reciepthound_1.jpg?fit=800%2C600&ssl=1"
-	                               style="width:100%; max-width:156px;"></td>
-	                            <td>
-	                               Date: ${`${today.getMonth() + 1} / ${today.getDate()} / ${today.getFullYear()}`}
-	                            </td>
-	                         </tr>
-	                      </table>
-	                   </td>
-	                </tr>
-	                <tr class="information">
-	                   <td colspan="2">
-	                      <table>
-	                         <tr>
-	                            <td>
-	                               Customer name: ${name}
-	                            </td>
-	                            <td>
-	                               Receipt number: ${receiptId}
-	                            </td>
-	                         </tr>
-	                      </table>
-	                   </td>
-	                </tr>
-	                <tr class="heading">
-	                   <td>Bought items:</td>
-	                   <td>Price</td>
-	                </tr>
-	                <tr class="item">
-	                   <td>First item:</td>
-	                   <td>${price1}$</td>
-	                </tr>
-	                <tr class="item">
-	                   <td>Second item:</td>
-	                   <td>${price2}$</td>
-	                </tr>
-	             </table>
-	             <br />
-	             <h1 class="justify-center">Total price: $ ${parseInt(price1) + parseInt(price2)}</h1>
-	          </div>
-	       </body>
-	    </html>
-    `;
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const CURRENCY_SYMBOLS = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  INR: "₹",
+  CAD: "CA$",
+  AUD: "AU$",
 };
+
+const normalizeItems = (items) => {
+  const list = Array.isArray(items) ? items : [];
+  return list
+    .map((item) => ({
+      label: escapeHtml(item?.label || "Item"),
+      price: Number(item?.price) || 0,
+    }))
+    .filter((item) => item.price >= 0);
+};
+
+export default function pdfTemplate({ name, items, receiptId, taxRate, currency }) {
+  const today = new Date();
+  const safeName = escapeHtml(name);
+  const safeReceiptId = escapeHtml(receiptId);
+  const safeItems = normalizeItems(items);
+  const symbol = CURRENCY_SYMBOLS[currency] || CURRENCY_SYMBOLS.USD;
+  const safeTaxRate = Math.max(0, Number(taxRate) || 0);
+
+  const subtotal = safeItems.reduce((sum, item) => sum + item.price, 0);
+  const taxAmount = subtotal * (safeTaxRate / 100);
+  const total = subtotal + taxAmount;
+
+  const format = (n) => `${symbol}${n.toFixed(2)}`;
+
+  const itemRows = safeItems
+    .map(
+      (item) => `
+              <tr class="item">
+                 <td>${item.label}</td>
+                 <td>${format(item.price)}</td>
+              </tr>`
+    )
+    .join("");
+
+  return `
+    <!doctype html>
+    <html>
+       <head>
+          <meta charset="utf-8">
+          <title>Receipt ${safeReceiptId}</title>
+          <style>
+             * { box-sizing: border-box; }
+             body {
+                margin: 0;
+                font-family: 'Helvetica Neue', 'Helvetica', Arial, sans-serif;
+                color: #2b2f3a;
+                background: #f4f6fb;
+             }
+             .invoice-box {
+                max-width: 720px;
+                margin: 24px auto;
+                background: #ffffff;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 1px 4px rgba(20, 30, 60, 0.08);
+             }
+             .header {
+                background: linear-gradient(135deg, #3383FF, #6a5aff);
+                color: #ffffff;
+                padding: 32px 40px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+             }
+             .header .brand {
+                font-size: 26px;
+                font-weight: 700;
+                letter-spacing: -0.01em;
+             }
+             .header .meta {
+                text-align: right;
+                font-size: 13px;
+                opacity: 0.9;
+                line-height: 1.6;
+             }
+             .body {
+                padding: 32px 40px 40px;
+             }
+             .info-row {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 28px;
+                padding-bottom: 20px;
+                border-bottom: 1px solid #eceff5;
+             }
+             .info-block .label {
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                color: #8892a6;
+                margin-bottom: 4px;
+             }
+             .info-block .value {
+                font-size: 15px;
+                font-weight: 600;
+                color: #2b2f3a;
+             }
+             table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 14px;
+             }
+             thead td {
+                background: #f4f6fb;
+                color: #8892a6;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                padding: 10px 12px;
+                font-weight: 600;
+             }
+             thead td:last-child, td:last-child {
+                text-align: right;
+             }
+             tr.item td {
+                padding: 12px;
+                border-bottom: 1px solid #f0f2f7;
+             }
+             .summary {
+                margin-top: 20px;
+                margin-left: auto;
+                width: 260px;
+             }
+             .summary-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 6px 0;
+                font-size: 14px;
+                color: #5b6274;
+             }
+             .summary-row.total {
+                margin-top: 8px;
+                padding-top: 14px;
+                border-top: 2px solid #2b2f3a;
+                font-size: 20px;
+                font-weight: 700;
+                color: #2b2f3a;
+             }
+             .footer {
+                text-align: center;
+                font-size: 12px;
+                color: #a3abbd;
+                padding: 20px 0 0;
+             }
+          </style>
+       </head>
+       <body>
+          <div class="invoice-box">
+             <div class="header">
+                <div class="brand">Receipt</div>
+                <div class="meta">
+                   ${today.getMonth() + 1} / ${today.getDate()} / ${today.getFullYear()}<br />
+                   #${safeReceiptId}
+                </div>
+             </div>
+             <div class="body">
+                <div class="info-row">
+                   <div class="info-block">
+                      <div class="label">Billed to</div>
+                      <div class="value">${safeName}</div>
+                   </div>
+                </div>
+                <table cellpadding="0" cellspacing="0">
+                   <thead>
+                      <tr>
+                         <td>Item</td>
+                         <td>Price</td>
+                      </tr>
+                   </thead>
+                   <tbody>
+                      ${itemRows}
+                   </tbody>
+                </table>
+                <div class="summary">
+                   <div class="summary-row">
+                      <span>Subtotal</span>
+                      <span>${format(subtotal)}</span>
+                   </div>
+                   <div class="summary-row">
+                      <span>Tax (${safeTaxRate}%)</span>
+                      <span>${format(taxAmount)}</span>
+                   </div>
+                   <div class="summary-row total">
+                      <span>Total</span>
+                      <span>${format(total)}</span>
+                   </div>
+                </div>
+                <div class="footer">Thank you for your business.</div>
+             </div>
+          </div>
+       </body>
+    </html>
+    `;
+}

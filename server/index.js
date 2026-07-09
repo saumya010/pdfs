@@ -1,28 +1,60 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const pdf = require('html-pdf');
-const cors = require('cors');
+import express from "express";
+import cors from "cors";
+import puppeteer from "puppeteer";
 
-const pdfTemplate = require('./documents');
+import pdfTemplate from "./documents/index.js";
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 5001;
 
 app.use(cors());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// POST - PDF generation and data fetching
-app.post('/create-pdf', (req, res) => {
-	pdf.create(pdfTemplate(req.body), {}).toFile('result.pdf', (err) => {
-		if(err) res.send(Promise.reject());
-		res.send(Promise.resolve());
-	})
-})
+let browserPromise;
+const getBrowser = () => {
+  if (!browserPromise) {
+    browserPromise = puppeteer.launch({ headless: true });
+  }
+  return browserPromise;
+};
 
-// GET - send generated PDF to client
-app.get('/fetch-pdf', (req, res) => {
-	res.sendFile(`${__dirname}/result.pdf`)
-})
+app.post("/create-pdf", async (req, res) => {
+  const { name, receiptId, items, taxRate, currency } = req.body;
+
+  if (!name || !receiptId) {
+    return res.status(400).json({ error: "name and receiptId are required" });
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: "at least one item is required" });
+  }
+
+  try {
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    await page.setContent(pdfTemplate({ name, receiptId, items, taxRate, currency }), {
+      waitUntil: "networkidle0",
+    });
+    const pdfBytes = await page.pdf({ format: "A4" });
+    await page.close();
+
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": "attachment; filename=receipt.pdf",
+    });
+    res.send(Buffer.from(pdfBytes));
+  } catch (err) {
+    console.error("Failed to generate PDF:", err);
+    res.status(500).json({ error: "Failed to generate PDF" });
+  }
+});
 
 app.listen(port, () => console.log(`Listening on port ${port}`));
+
+process.on("SIGINT", async () => {
+  if (browserPromise) {
+    const browser = await browserPromise;
+    await browser.close();
+  }
+  process.exit(0);
+});
